@@ -1,0 +1,2 @@
+n_estimators,criterion,max_depth,min_samples_split,min_samples_leaf,bootstrap,class_weight,accuracy,f1_score,recall,precision,roc_auc,cv_score,train_score,overfitting
+500,entropy,5,2,1,False,balanced,0.7413793103448276,0.5916515426497277,0.800982800982801,0.46906474820143884,0.8282697209929017,0.7241241932951568,0.7474123059229443,OK

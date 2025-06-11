@@ -1,90 +1,147 @@
-from sqlalchemy import create_engine, text
+import pyodbc
 import pandas as pd
+import numpy as np
 
-# Conectar a la base de datos de origen (coches) y destino (DwCoches)
-db_source = "mysql+pymysql://root:Mimadre1974@localhost:3306/coches"
-db_dw = "mysql+pymysql://root:Mimadre1974@localhost:3306/DwCoches"
+# 📌 🔹 Conexión a **Azure SQL** (Autenticación AAD Interactiva)
+AZURE_SERVER = 'uaxmathfis.database.windows.net'
+AZURE_DATABASE = 'rd'
+AZURE_DRIVER = '{ODBC Driver 18 for SQL Server}'
 
-engine_source = create_engine(db_source)
-engine_dw = create_engine(db_dw)
+# Conexión con AAD Interactive
+azure_conn_str = f"DRIVER={AZURE_DRIVER};SERVER={AZURE_SERVER};DATABASE={AZURE_DATABASE};Authentication=ActiveDirectoryInteractive"
 
-# Crear la base de datos del Data Warehouse si no existe
-connection = engine_source.connect()
-connection.execute(text("CREATE DATABASE IF NOT EXISTS DwCoches"))
-connection.close()
-print("Base de datos 'DwCoches' verificada o creada exitosamente.")
+# 📌 🔹 Conexión a **SQL Server LOCAL** (Autenticación de Windows)
+LOCAL_SERVER = 'localhost\SQLEXPRESS'  # Puede ser 'localhost' o el nombre del servidor SQL
+LOCAL_DATABASE = 'coches'  # Base de datos local
+LOCAL_DRIVER = '{ODBC Driver 18 for SQL Server}'
 
-# Obtener todas las tablas de la base de datos de origen
-connection_source = engine_source.connect()
-tables_result = connection_source.execute(text("SHOW TABLES"))
-tables = [row[0] for row in tables_result]
-connection_source.close()
+# Conexión con autenticación de Windows
+local_conn_str = f"DRIVER={LOCAL_DRIVER};SERVER={LOCAL_SERVER};DATABASE={LOCAL_DATABASE};Trusted_Connection=yes;TrustServerCertificate=yes"
 
-print(f"Tablas encontradas en 'coches': {tables}")
+# Establecer las conexiones
+conn_azure = pyodbc.connect(azure_conn_str)
+conn_local = pyodbc.connect(local_conn_str)
+cursor_local = conn_local.cursor()
 
-# Definir un diccionario para cambiar los nombres de las tablas
-table_name_mapping = {
-    "lkp_pord0_mysql": "dbo.lkp_producto",  
-    "lkp_tv_mysql": "dbo.lkp_ventas",
-    "stg_prod_mysql": "dbo.producto",
-    "stg_l_mysql": "dbo.lead",
-    "stg_t_mysql": "dbo.trafico",
-    "stg_p_mysql": "dbo.pedido",
-    "stg_sale_mysql": "dbo.venta"
+# Mapeo de tipos de datos de Pandas a SQL Server
+dtype_mapping = {
+    'int64': 'BIGINT',  
+    'float64': 'FLOAT',
+    'object': 'NVARCHAR(MAX)',
+    'bool': 'BIT',
+    'datetime64[ns]': 'DATETIME2(7)'
 }
 
-# Obtener los bastidores en ambas tablas
-query_bastidores = """
-SELECT p.bastidor_codificado_final
-FROM stg_p_mysql p
-INNER JOIN stg_sale_mysql s ON s.codigo_bas_codificado = p.bastidor_codificado_final
-"""
+# Nombres de las tablas
+TABLE_NAME_stg_t = '[TFM1].[stg_t]'  # Agregar el esquema correcto
+TABLE_NAME_web_lead_mod = '[TFM1].[web_lead_mod]'  # Agregar el esquema correcto
+TABLE_NAME_web_path = '[TFM1].[web_path]'
+TABLE_NAME_stg_l = '[TFM1].[stg_l]'  # Agregar el esquema correcto
+TABLE_NAME_CC_mod = '[TFM1].[CC_mod]'  # Agregar el esquema correcto
+TABLE_NAME_Coste_cd_mod = '[TFM1].[Coste_cd_mod]'  # Agregar el esquema correcto
+TABLE_NAME_Mosaic = '[TFM1].[Mosaic]'  # Agregar el esquema correcto
+TABLE_NAME_stg_p = '[TFM1].[stg_p]'  # Agregar el esquema correcto
 
-bastidores_comunes = pd.read_sql(query_bastidores, engine_source)
-bastidores_comunes = bastidores_comunes['bastidor_codificado_final'].tolist()
+# Leer los datos de Azure SQL en los DataFrames correspondientes
+#df_stg_t = pd.read_sql(f"SELECT * FROM {TABLE_NAME_stg_t}", conn_azure)
+#print(df_stg_t.dtypes)
+#df_web_lead_mod = pd.read_sql(f"SELECT * FROM {TABLE_NAME_web_lead_mod}", conn_azure)
+#print(df_web_lead_mod.dtypes)
+#df_web_path = pd.read_sql(f"SELECT * FROM {TABLE_NAME_web_path}", conn_azure)
+#print(df_web_path.dtypes)
+#print(df_web_path.head())
+#df_stg_l = pd.read_sql(f"SELECT * FROM {TABLE_NAME_stg_l}", conn_azure)
+#print(df_stg_l.dtypes)
+#print(df_stg_l.head())
+#df_CC_mod = pd.read_sql(f"SELECT * FROM {TABLE_NAME_CC_mod}", conn_azure)
+#print(df_CC_mod.dtypes)
+df_Coste_cd_mod = pd.read_sql(f"SELECT * FROM {TABLE_NAME_Coste_cd_mod}", conn_azure)
+# pasar la columna cpc a float
+# Reemplazar '#¡DIV/0!' y otros posibles errores por 0
+df_Coste_cd_mod['cpc'] = df_Coste_cd_mod['cpc'].replace(['#¡DIV/0!', '#DIV/0!', 'NaN', ''], 0)
+df_Coste_cd_mod['cpc'] = df_Coste_cd_mod['cpc'].astype(float)
+df_Coste_cd_mod = df_Coste_cd_mod.dropna()
+print(df_Coste_cd_mod.dtypes)
+print(df_Coste_cd_mod.head())
+#df_Mosaic = pd.read_sql(f"SELECT * FROM {TABLE_NAME_Mosaic}", conn_azure)
+#df_Mosaic.rename(columns={'Check': 'Check_flag'}, inplace=True)
+#print(df_Mosaic.head())
+#df_stg_p = pd.read_sql(f"SELECT * FROM {TABLE_NAME_stg_p}", conn_azure)
+#print(df_stg_p.dtypes)
+#print(df_stg_p.head())
 
-# Importar todas las tablas a 'DwCoches' con los nuevos nombres
-for table in tables:
-    new_table_name = table_name_mapping.get(table, table)  # Si no está en el diccionario, mantiene el mismo nombre
-    print(f"Importando tabla '{table}' como '{new_table_name}'...")
 
-    # Leer los datos de la tabla
-    df = pd.read_sql(f"SELECT * FROM {table}", engine_source)
+
+# Función para crear la tabla e insertar datos
+def create_and_insert_table(df, table_name):
+    # Eliminar la tabla anterior si existe
+    drop_table_sql = f"DROP TABLE IF EXISTS {table_name}"
+    cursor_local.execute(drop_table_sql)
+    conn_local.commit()
+
+    if table_name == TABLE_NAME_web_path:
+    ## Reemplazar valores NaN por None (NULL en SQL) en el DataFrame
+        df = df.where(pd.notna(df), '')
+    else:
+        ## Reemplazar valores NaN por None (NULL en SQL) en el DataFrame
+        df = df.where(pd.notna(df), None)
     
-    # Si la tabla es 'stg_p_mysql', filtramos
-    if table == "stg_p_mysql":
-        df = df[df['bastidor_codificado_final'].isin(bastidores_comunes)]
-        
-        # Eliminar filas duplicadas
-        df = df.drop_duplicates()
-        print(f"Filas duplicadas eliminadas en '{table}'.")
-        
-        
-        # Convertir fechas
-        df['fecha_del_pedido'] = pd.to_datetime(df['fecha_del_pedido'], format='%d/%m/%Y %H:%M:%S', errors='coerce').dt.strftime('%Y-%m-%d')
-        df['fecha_de_matriculacion'] = pd.to_datetime(df['fecha_de_matriculacion'], format='%d/%m/%Y %H:%M:%S', errors='coerce').dt.strftime('%Y-%m-%d')
-        df = df[df['fecha_de_matriculacion'] >= '2021-01-02']
+
+    # Generar la sentencia CREATE TABLE con los tipos correctos
+    create_table_sql = f"""
+    CREATE TABLE {table_name} (
+        {', '.join([f'{col} {dtype_mapping.get(str(dtype), "NVARCHAR(MAX)")}' for col, dtype in df.dtypes.items()])}
+    )
+    """
+    print("Sentencia SQL generada:")
+    print(create_table_sql)
+
+    # Ejecutar la creación de la tabla
+    cursor_local.execute(create_table_sql)
+    conn_local.commit()
+
+    # Preparar la sentencia INSERT con parámetros
+    insert_sql = f"""
+    INSERT INTO {table_name} ({', '.join(df.columns)}) 
+    VALUES ({', '.join(['?' for _ in df.columns])})
+    """
+
+    # Insertar los datos utilizando parámetros
+    for index, row in df.iterrows():
     
-    # Si la tabla es 'stg_sale_mysql', filtramos
-    if table == "stg_sale_mysql":
-        df = df[df['codigo_bas_codificado'].isin(bastidores_comunes)]
-        
-        # Convertir fechas
-        df['fecha_matricula_formateada'] = pd.to_datetime(df['fecha_matricula_formateada'], format='%d/%m/%Y', errors='coerce').dt.strftime('%Y-%m-%d')
-        df['fecha_aviso'] = pd.to_datetime(df['fecha_aviso'], format='%d/%m/%Y %H:%M:%S', errors='coerce').dt.strftime('%Y-%m-%d')
-        df['fecha_alta_matricula'] = pd.to_datetime(df['fecha_alta_matricula'], format='%d/%m/%Y %H:%M:%S', errors='coerce').dt.strftime('%Y-%m-%d')
-        
+        values = tuple(None if pd.isna(val) else val for val in row)
+        cursor_local.execute(insert_sql, values)
     
-    
-    # Guardar los datos en la base de datos del Data Warehouse con el nuevo nombre
-    df.to_sql(new_table_name, con=engine_dw, if_exists="replace", index=False)
+    conn_local.commit()
 
-    print(f"Tabla '{table}' importada correctamente como '{new_table_name}' en 'DwCoches'.")
+# Crear e insertar datos para cada DataFrame
+#create_and_insert_table(df_stg_t, TABLE_NAME_stg_t)
+#print("Tabla stg_t creada e insertada")
+#create_and_insert_table(df_web_lead_mod, TABLE_NAME_web_lead_mod)
+#print("Tabla web_lead_mod creada e insertada")
+#create_and_insert_table(df_web_path, TABLE_NAME_web_path)
+#print("Tabla web_path creada e insertada")
+#create_and_insert_table(df_stg_l, TABLE_NAME_stg_l)
+#print("Tabla stg_l creada e insertada")
+#create_and_insert_table(df_CC_mod, TABLE_NAME_CC_mod)
+#print("Tabla CC_mod creada e insertada")
+create_and_insert_table(df_Coste_cd_mod, TABLE_NAME_Coste_cd_mod)
+print("Tabla Coste_cd_mod creada e insertada")
+#create_and_insert_table(df_Mosaic, TABLE_NAME_Mosaic)
+#print("Tabla Mosaic creada e insertada")
+#create_and_insert_table(df_stg_p, TABLE_NAME_stg_p)
+#print("Tabla stg_p creada e insertada")
 
-print("Proceso ETL finalizado exitosamente.")
+with open("C:\\TFG\\DW\\tabla trafico ML.sql", "r", encoding="utf-8") as f:
+    sql_script = f.read()
 
+# Ejecutar múltiples sentencias (split por ;)
+for statement in sql_script.split(';'):
+    if statement.strip():  # Evitar líneas vacías
+        cursor_local.execute(statement)
+conn_local.commit()
 
-
-
-
-
+# Cerrar conexiones
+cursor_local.close()
+conn_local.close()
+conn_azure.close()
